@@ -37,19 +37,6 @@ const PAGES = [
 // ───────────────────────────────────────────────────────── live editors
 // Every mounted editor registers here so the X-ray loop can draw it and navigation can stop it.
 const live = new Set();
-const VIM_KEY = 'learn-strudel:vim';
-let vimEnabled = false;
-try {
-  vimEnabled = localStorage.getItem(VIM_KEY) === 'true';
-} catch {}
-
-function setVimEnabled(enabled) {
-  vimEnabled = enabled;
-  try {
-    localStorage.setItem(VIM_KEY, String(enabled));
-  } catch {}
-  for (const api of live) api.setVim(enabled);
-}
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 function toMidi(v) {
@@ -72,15 +59,7 @@ function createEditor({ id, title, code, tasks = [], after, compact = false }) {
   const playBtn = h('button', { class: 'btn play', onclick: () => api.play() }, '▶ Play');
   const stopBtn = h('button', { class: 'btn', onclick: () => api.stop() }, '■ Stop');
   const resetBtn = h('button', { class: 'btn ghost', title: 'Restore the original code', onclick: () => api.setCode(original, false) }, '↺ Reset');
-  const vimBtn = h('button', {
-    class: 'btn ghost vim-toggle',
-    type: 'button',
-    title: 'Toggle Vim keybindings for all code editors (Esc: normal mode, i: insert mode)',
-    'aria-label': 'Vim keybindings',
-    'aria-pressed': String(vimEnabled),
-    onclick: () => setVimEnabled(!vimEnabled),
-  }, 'Vim');
-  const head = h('header', {}, h('span', { class: 'etitle' }, title || ''), h('span', { class: 'ebtns' }, vimBtn, playBtn, stopBtn, resetBtn));
+  const head = h('header', {}, h('span', { class: 'etitle' }, title || ''), h('span', { class: 'ebtns' }, playBtn, stopBtn, resetBtn));
   const host = h('div', { class: 'ehost' });
   const err = h('div', { class: 'eerr', hidden: true });
   const xray = h('div', { class: 'xray' }, h('div', { class: 'xhint' }, 'Press play to X-ray the cycle'));
@@ -88,7 +67,19 @@ function createEditor({ id, title, code, tasks = [], after, compact = false }) {
 
   const el = document.createElement('strudel-editor');
   el.setAttribute('code', saved || code);
-  el.settings = { ...el.settings, keybindings: vimEnabled ? 'vim' : 'codemirror' };
+  el.settings = { ...el.settings, keybindings: 'vim' };
+  let firstVimFocus = true;
+  host.addEventListener('focusin', (event) => {
+    if (!firstVimFocus) return;
+    const view = el.editor?.editor;
+    if (!view?.dom.contains(event.target)) return;
+    const plugin = view.cm?.state.vimPlugin;
+    if (!plugin) return;
+    if (!view.cm.state.vim.insertMode) {
+      plugin.handleKey({ key: 'i', preventDefault() {}, stopPropagation() {} }, view);
+    }
+    firstVimFocus = false;
+  });
 
   const state = { started: false, pattern: null, cycle: null, rows: [], dirty: true };
   el.addEventListener('update', (e) => {
@@ -116,11 +107,6 @@ function createEditor({ id, title, code, tasks = [], after, compact = false }) {
     state,
     get ed() {
       return el.editor;
-    },
-    setVim(enabled) {
-      vimBtn.setAttribute('aria-pressed', String(enabled));
-      el.settings.keybindings = enabled ? 'vim' : 'codemirror';
-      el.editor?.changeSetting('keybindings', el.settings.keybindings);
     },
     mount() {
       host.append(el); // connectedCallback needs to be in the document, so call after wrap is attached
